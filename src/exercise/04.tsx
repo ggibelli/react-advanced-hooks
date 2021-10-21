@@ -8,7 +8,7 @@ type Message = {id: string; author: string; content: string}
 function MessagesDisplay({messages}: {messages: Array<Message>}) {
   const containerRef = React.useRef<HTMLDivElement>(null)
   // 🐨 replace useEffect with useLayoutEffect
-  React.useEffect(() => {
+  React.useLayoutEffect(() => {
     if (!containerRef.current) return
     containerRef.current.scrollTop = containerRef.current.scrollHeight
   })
@@ -36,7 +36,7 @@ function SlooooowSibling() {
   // how it impacts interactivity of the page before updates.
   React.useEffect(() => {
     // increase this number to see a more stark difference
-    sleep(300)
+    sleep(3000)
   })
   return null
 }

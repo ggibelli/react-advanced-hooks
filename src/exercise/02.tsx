@@ -11,60 +11,64 @@ import {
 } from '../pokemon'
 import {PokemonData} from '../types'
 
-// 🦺 I'd change "PokemonState" to "AsyncState"
-// Also rename the "pokemon" property to a more generic name like "data"
-// 🦺 Also, now that we're making a "generic" hook,
-// we'll want this type to be a generic that takes a DataType and uses that
-// instead of "PokemonData"
-type PokemonState =
+type AsyncState<DataType> =
   | {
       status: 'idle'
-      pokemon?: null
+      data?: null
       error?: null
+      promise?: null
     }
   | {
       status: 'pending'
-      pokemon?: null
+      data?: null
       error?: null
+      promise: Promise<DataType>
     }
   | {
       status: 'resolved'
-      pokemon: PokemonData
+      data: DataType
       error: null
+      promise: null
     }
   | {
       status: 'rejected'
-      pokemon: null
+      data: null
       error: Error
+      promise: null
     }
 
-// 🦺 similar to above, this will need to be a generic type now and rename "pokemon" to "data"
-// I'd also recommend renaming this
-type PokemonAction =
+type AsyncAction<DataType> =
   | {type: 'reset'}
-  | {type: 'pending'}
-  | {type: 'resolved'; pokemon: PokemonData}
-  | {type: 'rejected'; error: Error}
+  | {type: 'pending'; promise: Promise<DataType>}
+  | {type: 'resolved'; data: DataType; promise: Promise<DataType>}
+  | {type: 'rejected'; error: Error; promise: Promise<DataType>}
 
-// 🐨 this is going to be our generic asyncReducer
-// 🦺 make this function a generic that accepts a DataType and passes that to
-// your AsyncState and AsyncAction types
-function pokemonInfoReducer(
-  state: PokemonState,
-  action: PokemonAction,
-): PokemonState {
+function asyncReducer<T>(
+  state: AsyncState<T>,
+  action: AsyncAction<T>,
+): AsyncState<T> {
   switch (action.type) {
     case 'pending': {
-      // 🐨 replace "pokemon" with "data"
-      return {status: 'pending', pokemon: null, error: null}
+      return {
+        status: 'pending',
+        data: null,
+        error: null,
+        promise: action.promise,
+      }
     }
     case 'resolved': {
-      // 🐨 replace "pokemon" with "data" (in the action too!)
-      return {status: 'resolved', pokemon: action.pokemon, error: null}
+      if (action.promise !== state.promise) return state
+      return {status: 'resolved', data: action.data, error: null, promise: null}
     }
     case 'rejected': {
-      // 🐨 replace "pokemon" with "data"
-      return {status: 'rejected', pokemon: null, error: action.error}
+      if (action.promise !== state.promise) return state
+
+      return {
+        status: 'rejected',
+        data: null,
+        error: action.error,
+        promise: null,
+      }
     }
     default: {
       throw new Error(`Unhandled action type: ${action.type}`)
@@ -72,61 +76,49 @@ function pokemonInfoReducer(
   }
 }
 
-function PokemonInfo({pokemonName}: {pokemonName: string}) {
-  // 🐨 move all the code between the lines into a new useAsync function.
-  // 💰 look below to see how the useAsync hook is supposed to be called
-  // 🦺 useAsync will need to be a generic that takes the DataType which can
-  // be inferred from the asyncCallback.
-  // 💰 If you want some help, here's the function signature (or delete this
-  // comment really quick if you don't want the spoiler)!
-  // function useAsync<DataType>(
-  //   asyncCallback: () => Promise<DataType> | null,
-  //   dependencies: Array<unknown>,
-  // ) {/* code in here */}
-
-  // -------------------------- start --------------------------
-
-  const [state, dispatch] = React.useReducer(pokemonInfoReducer, {
+function useAsync<DataType>() {
+  const [state, dispatch] = React.useReducer<
+    React.Reducer<AsyncState<DataType>, AsyncAction<DataType>>
+  >(asyncReducer, {
     status: 'idle',
-    // 🐨 this will need to be "data" instead of "pokemon"
-    pokemon: null,
+    data: null,
     error: null,
   })
 
+  const run = React.useCallback((promise: Promise<DataType>) => {
+    dispatch({type: 'pending', promise})
+    promise.then(
+      data => {
+        dispatch({type: 'resolved', data, promise})
+      },
+      error => {
+        dispatch({type: 'rejected', error, promise})
+      },
+    )
+  }, [])
+
+  return {...state, run}
+}
+
+function PokemonInfo({pokemonName}: {pokemonName: string}) {
+  const state = useAsync<PokemonData>()
+
+  const {data, status, error, run} = state
   React.useEffect(() => {
-    // 💰 this first early-exit bit is a little tricky, so let me give you a hint:
-    // const promise = asyncCallback()
-    // if (!promise) {
-    //   return
-    // }
-    // then you can dispatch and handle the promise etc...
     if (!pokemonName) {
       return
     }
-    dispatch({type: 'pending'})
-    fetchPokemon(pokemonName).then(
-      pokemon => {
-        dispatch({type: 'resolved', pokemon})
-      },
-      error => {
-        dispatch({type: 'rejected', error})
-      },
-    )
-    // 🐨 you'll accept dependencies as an array and pass that here.
-    // 🐨 because of limitations with ESLint, you'll need to ignore
-    // the react-hooks/exhaustive-deps rule. We'll fix this in an extra credit.
-  }, [pokemonName])
-  // --------------------------- end ---------------------------
+    const abortController = new AbortController()
 
-  // 🐨 here's how you'll use the new useAsync hook you're writing:
-  // const state = useAsync(() => {
-  //   if (!pokemonName) {
-  //     return
-  //   }
-  //   return fetchPokemon(pokemonName)
-  // }, [pokemonName])
-  // 🐨 this will change from "pokemon" to "data"
-  const {pokemon, status, error} = state
+    // 💰 note the absense of `await` here. We're literally passing the promise
+    // to `run` so `useAsync` can attach it's own `.then` handler on it to keep
+    // track of the state of the promise.
+    const pokemonPromise = fetchPokemon(pokemonName, {
+      signal: abortController.signal,
+    })
+    run(pokemonPromise)
+    return () => abortController.abort()
+  }, [pokemonName, run])
 
   switch (status) {
     case 'idle':
@@ -136,7 +128,7 @@ function PokemonInfo({pokemonName}: {pokemonName: string}) {
     case 'rejected':
       throw error
     case 'resolved':
-      return <PokemonDataView pokemon={pokemon} />
+      return <PokemonDataView pokemon={data} />
     default:
       throw new Error('This should be impossible')
   }

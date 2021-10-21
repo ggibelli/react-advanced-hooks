@@ -3,8 +3,12 @@
 
 import * as React from 'react'
 
+const formatCountDebugValue = ({query, state}) => `\`${query}\` => ${state}`
+
 function useMedia(query: string, initialState = false) {
   const [state, setState] = React.useState(initialState)
+  React.useDebugValue(`\`${query}\` => ${state}`)
+
   // 🐨 call React.useDebugValue here.
   // 💰 here's the formatted label I use: `\`${query}\` => ${state}`
 
